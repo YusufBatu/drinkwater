@@ -21,6 +21,7 @@ class StorageService {
   static const String _keyStepBaseline = 'drinkwater_step_baseline';
   static const String _keyStepDateKey = 'drinkwater_step_date_key';
   static const String _keyStepHistory = 'drinkwater_step_history';
+  static const String _keyStepTodaySteps = 'drinkwater_step_today_steps';
 
   // Su kayıtlarını yükle
   static Future<List<WaterLog>> loadLogs() async {
@@ -158,6 +159,16 @@ class StorageService {
     } catch (e) {
       return [];
     }
+  }
+
+  static Future<int> loadTodaySteps() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyStepTodaySteps) ?? 0;
+  }
+
+  static Future<void> saveTodaySteps(int steps) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyStepTodaySteps, steps);
   }
 
   static Future<void> saveStepHistory(List<StepLog> history) async {

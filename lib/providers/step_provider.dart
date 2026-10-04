@@ -51,13 +51,42 @@ class StepProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    final todayKey = _getTodayKey();
     _stepTarget = await StorageService.loadStepTarget();
-    _baselineSensorSteps = await StorageService.loadStepBaseline();
-    _lastDateKey = await StorageService.loadStepDateKey() ?? _getTodayKey();
     _history = await StorageService.loadStepHistory();
 
-    // Gün değişimi kontrolü (Gece 00:00 reset kontrolü)
-    _checkDayRollover();
+    final savedDateKey = await StorageService.loadStepDateKey();
+    final savedTodaySteps = await StorageService.loadTodaySteps();
+    final savedBaseline = await StorageService.loadStepBaseline();
+
+    if (savedDateKey == null || savedDateKey.isEmpty) {
+      // Uygulamanın ilk kez açılışı
+      _lastDateKey = todayKey;
+      _todaySteps = 0;
+      _baselineSensorSteps = -1;
+      await StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+      await StorageService.saveTodaySteps(0);
+    } else if (savedDateKey != todayKey) {
+      // 1. SORUNUN ÇÖZÜMÜ: Gün değişmiş (gece yarısı 00:00 geçmiş veya ertesi gün açılmış)
+      // Dünün adımları diske kaydedilmişti; şimdi geçmişe güvenle arşivliyoruz.
+      if (savedTodaySteps > 0) {
+        _archiveDay(savedDateKey, savedTodaySteps);
+      }
+
+      // 2. SORUNUN ÇÖZÜMÜ: Yeni gün için sayacı sıfırla, baseline'ı -1 bırak
+      // (Böylece 0 kabul edilip hayalet 50.000 adım patlaması yaşanmaz; ilk sensör verisi gelince baz alınır)
+      _lastDateKey = todayKey;
+      _todaySteps = 0;
+      _baselineSensorSteps = -1;
+      await StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+      await StorageService.saveTodaySteps(0);
+    } else {
+      // 3. SORUNUN ÇÖZÜMÜ: Gün içi yeniden açılış
+      // Önceden diske kaydedilen adımları anında yükle (0 görünmez)
+      _lastDateKey = todayKey;
+      _todaySteps = savedTodaySteps;
+      _baselineSensorSteps = savedBaseline;
+    }
 
     // Sensör izinlerini iste ve dinlemeyi başlat
     await _initPedometer();
@@ -71,36 +100,23 @@ class StepProvider extends ChangeNotifier {
     return "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
   }
 
-  // Gece 00:00 veya yeni gün kontrolü
-  void _checkDayRollover([int currentRawSensorSteps = 0]) {
-    final todayKey = _getTodayKey();
+  // Geçmiş güne ait adımları arşive ekler
+  void _archiveDay(String dateKey, int steps) {
+    final existingIndex = _history.indexWhere((h) => h.dateKey == dateKey);
+    final log = StepLog(
+      dateKey: dateKey,
+      steps: steps,
+      target: _stepTarget,
+      distanceKm: steps * 0.00075,
+      calories: (steps * 0.04).round(),
+    );
 
-    if (_lastDateKey != todayKey && _lastDateKey.isNotEmpty) {
-      // Dünün verisini geçmişe arşivle
-      if (_todaySteps > 0) {
-        final existingIndex = _history.indexWhere((h) => h.dateKey == _lastDateKey);
-        final yesterdayLog = StepLog(
-          dateKey: _lastDateKey,
-          steps: _todaySteps,
-          target: _stepTarget,
-          distanceKm: distanceKm,
-          calories: caloriesBurned,
-        );
-
-        if (existingIndex >= 0) {
-          _history[existingIndex] = yesterdayLog;
-        } else {
-          _history.insert(0, yesterdayLog);
-        }
-        StorageService.saveStepHistory(_history);
-      }
-
-      // Bugün için sayacı sıfırla ve yeni gün bazını kaydet
-      _todaySteps = 0;
-      _baselineSensorSteps = currentRawSensorSteps;
-      _lastDateKey = todayKey;
-      StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+    if (existingIndex >= 0) {
+      _history[existingIndex] = log;
+    } else {
+      _history.insert(0, log);
     }
+    StorageService.saveStepHistory(_history);
   }
 
   // Sensörü başlat
@@ -141,21 +157,40 @@ class StepProvider extends ChangeNotifier {
     final int rawSensorSteps = event.steps;
     final todayKey = _getTodayKey();
 
-    // İlk kez çalışıyorsa veya gün değişmişse
-    if (_baselineSensorSteps == -1 || _lastDateKey != todayKey) {
-      _checkDayRollover(rawSensorSteps);
-      _baselineSensorSteps = rawSensorSteps;
+    // 1. Uygulama açıkken gün değişimi olduysa (Gece 00:00 rollover)
+    if (_lastDateKey != todayKey && _lastDateKey.isNotEmpty) {
+      if (_todaySteps > 0) {
+        _archiveDay(_lastDateKey, _todaySteps);
+      }
       _lastDateKey = todayKey;
+      _baselineSensorSteps = rawSensorSteps;
+      _todaySteps = 0;
+      StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+      StorageService.saveTodaySteps(0);
+    }
+
+    // 2. Bugünün baseline'ı henüz belirlenmemişse (yeni günün ilk sensör verisi)
+    // Böylece rawSensorSteps ne kadar büyük olursa olsun (örn: 60.000), baz olarak alınır ve gün 0'dan başlar.
+    if (_baselineSensorSteps == -1) {
+      _baselineSensorSteps = rawSensorSteps - _todaySteps;
+      if (_baselineSensorSteps < 0) _baselineSensorSteps = rawSensorSteps;
       StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
     }
 
-    // Telefon yeniden başlatılmışsa (Sensör değeri baz değerden küçük kalırsa)
+    // 3. Telefon yeniden başlatılmışsa (rawSensorSteps baz değerden küçük olursa)
     if (rawSensorSteps < _baselineSensorSteps) {
-      _baselineSensorSteps = 0;
+      // Yeniden başlatma öncesi atılan adımlar _todaySteps içinde korunur
+      _baselineSensorSteps = rawSensorSteps - _todaySteps;
       StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
     }
 
-    _todaySteps = (rawSensorSteps - _baselineSensorSteps).clamp(0, 999999);
+    // 4. Günlük adım hesabını yap ve diske kaydet
+    final calculated = rawSensorSteps - _baselineSensorSteps;
+    if (calculated >= _todaySteps) {
+      _todaySteps = calculated.clamp(0, 999999);
+      StorageService.saveTodaySteps(_todaySteps);
+    }
+
     _isSensorAvailable = true;
     notifyListeners();
   }
@@ -181,17 +216,24 @@ class StepProvider extends ChangeNotifier {
 
   // Test veya Manuel Adım Ekleme (Emülatör/Sensörsüz durumlar için)
   void manualAddSteps(int count) {
+    if (count <= 0) return;
     _todaySteps += count;
+    if (_baselineSensorSteps != -1) {
+      _baselineSensorSteps -= count;
+      StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+    }
+    StorageService.saveTodaySteps(_todaySteps);
     notifyListeners();
   }
 
-  // Son 7 Günün Adım İstatistikleri (Grafik için)
+  // Son 7 Günün Adım İstatistikleri (Grafik için - DST güvenli)
   List<StepDayStat> getPast7DaysStepStats() {
     final List<StepDayStat> stats = [];
     final now = DateTime.now();
 
     for (int i = 6; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
+      // Duration(days: i) yerine DST ve saat kayması güvenli DateTime hesabı
+      final date = DateTime(now.year, now.month, now.day - i);
       final dateKey = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
 
       int stepsForDay = 0;
