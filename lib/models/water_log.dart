@@ -20,9 +20,11 @@ class WaterLog {
 
   factory WaterLog.fromJson(Map<String, dynamic> json) {
     return WaterLog(
-      id: json['id'] as String,
-      amount: json['amount'] as int,
-      timestamp: DateTime.parse(json['timestamp'] as String),
+      id: json['id']?.toString() ?? '',
+      amount: (json['amount'] as num?)?.toInt() ?? 0,
+      timestamp: json['timestamp'] != null
+          ? DateTime.tryParse(json['timestamp'].toString()) ?? DateTime.now()
+          : DateTime.now(),
     );
   }
 }

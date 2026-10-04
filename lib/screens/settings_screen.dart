@@ -162,10 +162,10 @@ class SettingsScreen extends StatelessWidget {
                       child: Icon(Icons.send_outlined, color: Colors.green),
                     ),
                     title: const Text(
-                      'Test Bildirimi Gönder',
+                      'Anında Test Bildirimi',
                       style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
                     ),
-                    subtitle: const Text('Sistemin çalıştığını hemen test et'),
+                    subtitle: const Text('Bildirim ses ve görünümünü hemen dene'),
                     onTap: () async {
                       await waterProvider.sendTestNotification();
                       if (context.mounted) {
@@ -173,6 +173,30 @@ class SettingsScreen extends StatelessWidget {
                           const SnackBar(
                             content: Text('Test bildirimi telefonunuza gönderildi! 📱'),
                             duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                  const Divider(height: 1, indent: 64),
+                  // 1 Dakika Sonra Zamanlanmış Test Butonu
+                  ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0xFFE0F2FE),
+                      child: Icon(Icons.alarm, color: Colors.blue),
+                    ),
+                    title: const Text(
+                      '1 Dakika Sonra Hatırlatma Testi',
+                      style: TextStyle(fontWeight: FontWeight.w600, color: Colors.blue),
+                    ),
+                    subtitle: const Text('Zamanlanmış arka plan alarmını test et (ekranı kilitleyin)'),
+                    onTap: () async {
+                      await waterProvider.sendOneMinuteReminderTest();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Hatırlatma kuruldu! 1 dakika sonra bildirim gelecek, ekranı kilitleyebilirsiniz ⏱️'),
+                            duration: Duration(seconds: 4),
                           ),
                         );
                       }
@@ -200,7 +224,7 @@ class SettingsScreen extends StatelessWidget {
                 style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w600),
               ),
               subtitle: const Text('Bugünkü ve geçmiş tüm su ve adım verilerini siler'),
-              onTap: () => _showResetConfirmationDialog(context, waterProvider),
+              onTap: () => _showResetConfirmationDialog(context, waterProvider, stepProvider),
             ),
           ),
 
@@ -213,7 +237,7 @@ class SettingsScreen extends StatelessWidget {
                 Icon(Icons.health_and_safety_outlined, size: 36, color: Colors.blue.withValues(alpha: 0.4)),
                 const SizedBox(height: 6),
                 const Text(
-                  'LifeTrack / DrinkWater v1.1.0',
+                  'DrinkWater',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
                 Text(
@@ -449,16 +473,19 @@ class SettingsScreen extends StatelessWidget {
               child: const Text('İptal'),
             ),
             FilledButton(
-              onPressed: () {
+              onPressed: () async {
                 final weight = double.tryParse(controller.text.trim());
                 if (weight != null && weight > 20 && weight < 300) {
-                  provider.calculateAndSetTargetFromWeight(weight);
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('$weight kg için hedef ${provider.dailyTarget} ml olarak ayarlandı!'),
-                    ),
-                  );
+                  final newTarget = (weight * 35).round();
+                  await provider.calculateAndSetTargetFromWeight(weight);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('$weight kg için hedef $newTarget ml olarak ayarlandı!'),
+                      ),
+                    );
+                  }
                 }
               },
               child: const Text('Hesapla & Ayarla'),
@@ -470,14 +497,18 @@ class SettingsScreen extends StatelessWidget {
   }
 
   // Veri Sıfırlama Onay Dialog'u
-  void _showResetConfirmationDialog(BuildContext context, WaterProvider provider) {
+  void _showResetConfirmationDialog(
+    BuildContext context,
+    WaterProvider waterProvider,
+    StepProvider stepProvider,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) {
         return AlertDialog(
           title: const Text('Tüm Verileri Sıfırla?'),
           content: const Text(
-            'Bu işlem bugün içtiğiniz suları ve geçmişteki tüm kayıtları kalıcı olarak silecektir. Bu işlem geri alınamaz.',
+            'Bu işlem bugünkü ve geçmişteki tüm su ve adım kayıtlarını kalıcı olarak silecektir. Bu işlem geri alınamaz.',
           ),
           actions: [
             TextButton(
@@ -487,14 +518,12 @@ class SettingsScreen extends StatelessWidget {
             FilledButton(
               style: FilledButton.styleFrom(backgroundColor: Colors.red),
               onPressed: () async {
-                final allIds = provider.logs.map((l) => l.id).toList();
-                for (var id in allIds) {
-                  await provider.removeLog(id);
-                }
+                await waterProvider.clearAllLogs();
+                await stepProvider.resetAllStepData();
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Tüm kayıtlar başarıyla sıfırlandı.')),
+                    const SnackBar(content: Text('Tüm su ve adım kayıtları başarıyla sıfırlandı.')),
                   );
                 }
               },

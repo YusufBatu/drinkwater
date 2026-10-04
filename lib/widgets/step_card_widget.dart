@@ -16,23 +16,25 @@ class StepCardWidget extends StatelessWidget {
     final int percent = (stepProvider.progressRatio * 100).toInt();
     final bool isCompleted = stepProvider.isTargetReached;
 
+    final bool isDark = theme.brightness == Brightness.dark;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isCompleted
-            ? const Color(0xFFF0FDF4)
-            : const Color(0xFFF8FAFC),
+        color: isDark
+            ? const Color(0xFF1E293B)
+            : (isCompleted ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC)),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isCompleted
-              ? const Color(0xFF86EFAC)
-              : theme.colorScheme.outlineVariant.withValues(alpha: 0.5),
+          color: isDark
+              ? (isCompleted ? Colors.green.withValues(alpha: 0.5) : Colors.white12)
+              : (isCompleted ? const Color(0xFF86EFAC) : theme.colorScheme.outlineVariant.withValues(alpha: 0.5)),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -48,8 +50,8 @@ class StepCardWidget extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: const Color(0xFFDCFCE7),
-                    child: Icon(Icons.directions_walk, size: 20, color: Colors.green[700]),
+                    backgroundColor: isDark ? Colors.green.withValues(alpha: 0.25) : const Color(0xFFDCFCE7),
+                    child: Icon(Icons.directions_walk, size: 20, color: isDark ? Colors.greenAccent : Colors.green[700]),
                   ),
                   const SizedBox(width: 10),
                   const Text(
@@ -61,17 +63,25 @@ class StepCardWidget extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isCompleted
-                      ? const Color(0xFFDCFCE7)
-                      : Colors.blueGrey.withValues(alpha: 0.1),
+                  color: isDark
+                      ? (isCompleted ? Colors.green.withValues(alpha: 0.2) : Colors.white10)
+                      : (isCompleted ? const Color(0xFFDCFCE7) : Colors.blueGrey.withValues(alpha: 0.1)),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  isCompleted ? '🎉 Hedef Tamamlandı!' : stepProvider.pedestrianStatus,
+                  !stepProvider.isSensorAvailable
+                      ? 'İzin Gerekli ⚠️'
+                      : isCompleted
+                          ? '🎉 Hedef Tamamlandı!'
+                          : stepProvider.pedestrianStatus,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isCompleted ? Colors.green[800] : Colors.blueGrey[700],
+                    color: !stepProvider.isSensorAvailable
+                        ? Colors.orangeAccent
+                        : isCompleted
+                            ? (isDark ? Colors.greenAccent : Colors.green[800])
+                            : (isDark ? Colors.white70 : Colors.blueGrey[700]),
                   ),
                 ),
               ),
@@ -166,6 +176,40 @@ class StepCardWidget extends StatelessWidget {
               ),
             ],
           ),
+
+          // Sensör veya İzin Kapalıysa Kullanıcıyı Bilgilendiren Kart
+          if (!stepProvider.isSensorAvailable) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 18, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Adım sayımı için fiziksel aktivite izni gereklidir.',
+                      style: TextStyle(fontSize: 11, color: Colors.amber[900], fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: () => stepProvider.retryPermissionAndInit(),
+                    child: const Text('İzin Ver', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

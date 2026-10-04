@@ -122,14 +122,24 @@ class StepProvider extends ChangeNotifier {
   // Sensörü başlat
   Future<void> _initPedometer() async {
     // Android Aktivite Tanıma İzni
-    final status = await Permission.activityRecognition.request();
-    if (status.isDenied || status.isPermanentlyDenied) {
-      _isSensorAvailable = false;
-      notifyListeners();
-      return;
+    try {
+      final status = await Permission.activityRecognition.request();
+      if (status.isDenied || status.isPermanentlyDenied) {
+        _isSensorAvailable = false;
+        notifyListeners();
+        return;
+      }
+    } catch (e) {
+      if (kDebugMode) print("İzin kontrolü hatası: $e");
     }
 
     try {
+      // Eski abonelikler varsa iptal et (çift dinleyici ve sızıntıyı önle)
+      await _stepCountSubscription?.cancel();
+      _stepCountSubscription = null;
+      await _pedestrianStatusSubscription?.cancel();
+      _pedestrianStatusSubscription = null;
+
       // Adım sayar akışını dinle
       _stepCountSubscription = Pedometer.stepCountStream.listen(
         _onStepCount,
@@ -237,26 +247,52 @@ class StepProvider extends ChangeNotifier {
       final dateKey = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
 
       int stepsForDay = 0;
+      int targetForDay = _stepTarget;
       if (i == 0) {
         stepsForDay = _todaySteps;
+        targetForDay = _stepTarget;
       } else {
         final found = _history.firstWhere(
           (h) => h.dateKey == dateKey,
           orElse: () => StepLog(dateKey: dateKey, steps: 0, target: _stepTarget, distanceKm: 0, calories: 0),
         );
         stepsForDay = found.steps;
+        targetForDay = found.target > 0 ? found.target : _stepTarget;
       }
 
       stats.add(
         StepDayStat(
           date: date,
           steps: stepsForDay,
-          target: _stepTarget,
-          isCompleted: stepsForDay >= _stepTarget,
+          target: targetForDay,
+          isCompleted: stepsForDay >= targetForDay,
         ),
       );
     }
     return stats;
+  }
+
+  // Tüm Adım Verilerini Tek Seferde Temizle
+  Future<void> resetAllStepData() async {
+    _todaySteps = 0;
+    _history.clear();
+    _baselineSensorSteps = -1;
+    await StorageService.saveTodaySteps(0);
+    await StorageService.saveStepHistory([]);
+    await StorageService.saveStepBaselineAndDate(-1, _getTodayKey());
+    notifyListeners();
+  }
+
+  // Sensör iznini tekrar iste veya ayarları aç
+  Future<void> retryPermissionAndInit() async {
+    final status = await Permission.activityRecognition.request();
+    if (status.isGranted) {
+      _isSensorAvailable = true;
+      await _initPedometer();
+      notifyListeners();
+    } else if (status.isPermanentlyDenied) {
+      await openAppSettings();
+    }
   }
 
   @override

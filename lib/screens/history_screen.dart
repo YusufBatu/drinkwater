@@ -436,18 +436,21 @@ class _HistoryScreenState extends State<HistoryScreen>
   }
 
   BarChartData _buildBarChartData(List<DayStat> stats, int target) {
-    int maxVal = target;
+    int maxVal = target > 0 ? target : 2000;
     for (var s in stats) {
       if (s.totalAmount > maxVal) maxVal = s.totalAmount;
     }
-    final double maxY = (maxVal * 1.25).toDouble();
+    // fl_chart çökmesini önlemek için: maxY mutlaka 0'dan büyük olmalı (minY = 0)
+    final double maxY = maxVal > 0 ? (maxVal * 1.25).toDouble() : 1000.0;
 
     return BarChartData(
       maxY: maxY,
       barTouchData: BarTouchData(
         touchTooltipData: BarTouchTooltipData(
           getTooltipItem: (group, groupIndex, rod, rodIndex) {
-            final day = stats[group.x.toInt()];
+            final int index = group.x.toInt();
+            if (index < 0 || index >= stats.length) return null;
+            final day = stats[index];
             final dayName = DateFormat('E', 'tr_TR').format(day.date);
             return BarTooltipItem(
               '$dayName\n${day.totalAmount} ml',
@@ -535,18 +538,21 @@ class _HistoryScreenState extends State<HistoryScreen>
   }
 
   BarChartData _buildStepBarChartData(List<StepDayStat> stats, int target) {
-    int maxVal = target;
+    int maxVal = target > 0 ? target : 8000;
     for (var s in stats) {
       if (s.steps > maxVal) maxVal = s.steps;
     }
-    final double maxY = (maxVal * 1.25).toDouble();
+    // fl_chart çökmesini önlemek için: maxY mutlaka 0'dan büyük olmalı (minY = 0)
+    final double maxY = maxVal > 0 ? (maxVal * 1.25).toDouble() : 5000.0;
 
     return BarChartData(
       maxY: maxY,
       barTouchData: BarTouchData(
         touchTooltipData: BarTouchTooltipData(
           getTooltipItem: (group, groupIndex, rod, rodIndex) {
-            final day = stats[group.x.toInt()];
+            final int index = group.x.toInt();
+            if (index < 0 || index >= stats.length) return null;
+            final day = stats[index];
             final dayName = DateFormat('E', 'tr_TR').format(day.date);
             return BarTooltipItem(
               '$dayName\n${day.steps} adım',

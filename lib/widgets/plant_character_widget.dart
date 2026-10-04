@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 
 class PlantCharacterWidget extends StatefulWidget {
   final double progress; // 0.0 ile 1.0 arası veya üstü
-  final int todayTotal;
-  final int target;
+  final int? todayTotal;
+  final int? target;
 
   const PlantCharacterWidget({
     super.key,
     required this.progress,
-    required this.todayTotal,
-    required this.target,
+    this.todayTotal,
+    this.target,
   });
 
   @override
@@ -20,7 +20,6 @@ class _PlantCharacterWidgetState extends State<PlantCharacterWidget>
     with SingleTickerProviderStateMixin {
   late AnimationController _bounceController;
   late Animation<double> _scaleAnimation;
-  bool _showBubble = false;
 
   @override
   void initState() {
@@ -41,25 +40,28 @@ class _PlantCharacterWidgetState extends State<PlantCharacterWidget>
   }
 
   void _onTapPlant() {
-    _bounceController.forward().then((_) => _bounceController.reverse());
-    setState(() {
-      _showBubble = !_showBubble;
+    if (_bounceController.isAnimating) return;
+    _bounceController.forward().then((_) {
+      if (mounted) {
+        _bounceController.reverse();
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final bool isDark = theme.brightness == Brightness.dark;
     final plantState = _getPlantState(widget.progress);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: plantState.backgroundColor,
+        color: isDark ? const Color(0xFF1E293B) : plantState.backgroundColor,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: plantState.borderColor,
+          color: isDark ? plantState.progressColor.withValues(alpha: 0.4) : plantState.borderColor,
           width: 1.5,
         ),
       ),
@@ -74,11 +76,11 @@ class _PlantCharacterWidgetState extends State<PlantCharacterWidget>
                 width: 76,
                 height: 76,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: isDark ? const Color(0xFF0F172A) : Colors.white.withValues(alpha: 0.9),
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: plantState.borderColor.withValues(alpha: 0.3),
+                      color: isDark ? Colors.black26 : plantState.borderColor.withValues(alpha: 0.3),
                       blurRadius: 10,
                       spreadRadius: 1,
                     ),
@@ -110,13 +112,13 @@ class _PlantCharacterWidgetState extends State<PlantCharacterWidget>
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
-                        color: plantState.textColor,
+                        color: isDark ? plantState.progressColor : plantState.textColor,
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: plantState.badgeColor,
+                        color: isDark ? plantState.progressColor.withValues(alpha: 0.2) : plantState.badgeColor,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
@@ -124,7 +126,7 @@ class _PlantCharacterWidgetState extends State<PlantCharacterWidget>
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: plantState.textColor,
+                          color: isDark ? plantState.progressColor : plantState.textColor,
                         ),
                       ),
                     ),

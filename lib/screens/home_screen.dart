@@ -484,14 +484,18 @@ class HomeScreen extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     FilledButton.tonal(
-                      onPressed: () {
+                      onPressed: () async {
                         final w = double.tryParse(weightController.text.trim());
                         if (w != null && w > 0) {
-                          provider.calculateAndSetTargetFromWeight(w);
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Kilonuza göre hedef ${provider.dailyTarget} ml yapıldı.')),
-                          );
+                          final newTarget = (w * 35).round();
+                          targetController.text = newTarget.toString();
+                          await provider.calculateAndSetTargetFromWeight(w);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Kilonuza göre hedef $newTarget ml yapıldı.')),
+                            );
+                          }
                         }
                       },
                       child: const Text('Hesapla'),

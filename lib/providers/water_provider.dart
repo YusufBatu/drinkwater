@@ -105,10 +105,11 @@ class WaterProvider extends ChangeNotifier {
   Future<void> addWater(int amount) async {
     if (amount <= 0) return;
 
+    final now = DateTime.now();
     final newLog = WaterLog(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: '${now.microsecondsSinceEpoch}_${_logs.length}',
       amount: amount,
-      timestamp: DateTime.now(),
+      timestamp: now,
     );
 
     _logs.add(newLog);
@@ -156,7 +157,7 @@ class WaterProvider extends ChangeNotifier {
     final now = DateTime.now();
 
     for (int i = 6; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
+      final date = DateTime(now.year, now.month, now.day - i);
       final totalForDay = _logs.where((log) {
         return log.timestamp.year == date.year &&
             log.timestamp.month == date.month &&
@@ -181,7 +182,7 @@ class WaterProvider extends ChangeNotifier {
     final now = DateTime.now();
 
     for (int i = 0; i < 30; i++) {
-      final date = now.subtract(Duration(days: i));
+      final date = DateTime(now.year, now.month, now.day - i);
       final totalForDay = _logs.where((log) {
         return log.timestamp.year == date.year &&
             log.timestamp.month == date.month &&
@@ -224,7 +225,7 @@ class WaterProvider extends ChangeNotifier {
     int startIndex = isTargetReached ? 0 : 1;
 
     for (int i = startIndex; i < 365; i++) {
-      final date = now.subtract(Duration(days: i));
+      final date = DateTime(now.year, now.month, now.day - i);
       final total = _logs.where((log) {
         return log.timestamp.year == date.year &&
             log.timestamp.month == date.month &&
@@ -304,5 +305,17 @@ class WaterProvider extends ChangeNotifier {
       title: '💧 Test Hatırlatıcısı',
       body: 'Harika! DrinkWater bildirim sistemi telefonunuzda sorunsuz çalışıyor.',
     );
+  }
+
+  // 1 Dakika Sonra Zamanlanmış Test Bildirimi Kur
+  Future<void> sendOneMinuteReminderTest() async {
+    await NotificationService.scheduleOneMinuteTestReminder();
+  }
+
+  // Tüm Su Kayıtlarını Tek Seferde Temizle
+  Future<void> clearAllLogs() async {
+    _logs.clear();
+    await StorageService.saveLogs([]);
+    notifyListeners();
   }
 }
