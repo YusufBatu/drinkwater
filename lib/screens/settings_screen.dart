@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../providers/water_provider.dart';
 import '../providers/step_provider.dart';
+import '../services/health_service.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -11,12 +13,6 @@ class SettingsScreen extends StatelessWidget {
     final waterProvider = Provider.of<WaterProvider>(context);
     final stepProvider = Provider.of<StepProvider>(context);
     final theme = Theme.of(context);
-
-    final String wakeTimeStr =
-        '${waterProvider.wakeUpHour.toString().padLeft(2, '0')}:${waterProvider.wakeUpMinute.toString().padLeft(2, '0')}';
-    final String bedTimeStr =
-        '${waterProvider.bedTimeHour.toString().padLeft(2, '0')}:${waterProvider.bedTimeMinute.toString().padLeft(2, '0')}';
-    final String intervalLabel = _getIntervalLabel(waterProvider.reminderIntervalMinutes);
 
     return Scaffold(
       appBar: AppBar(
@@ -80,7 +76,7 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 20),
 
-          // --- 2. Akıllı Bildirim & Hatırlatıcı Bölümü ---
+          // --- 2. Günlük Hatırlatıcı Bölümü ---
           _buildSectionHeader(context, 'BİLDİRİM & HATIRLATICI'),
           Card(
             elevation: 0.5,
@@ -101,7 +97,7 @@ class SettingsScreen extends StatelessWidget {
                   title: const Text('Su İçme Hatırlatıcıları'),
                   subtitle: Text(
                     waterProvider.notificationsEnabled
-                        ? 'Düzenli aralıklarla bildirim gönderiliyor'
+                        ? 'Her gün 12:00 ve 21:00 saatlerinde hatırlatma gönderilir'
                         : 'Bildirimler kapalı',
                   ),
                   value: waterProvider.notificationsEnabled,
@@ -110,7 +106,9 @@ class SettingsScreen extends StatelessWidget {
                     if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text(val ? 'Bildirimler açıldı 🔔' : 'Bildirimler kapatıldı 🔕'),
+                          content: Text(val
+                              ? 'Hatırlatıcılar açıldı (12:00 & 21:00) 🔔'
+                              : 'Hatırlatıcılar kapatıldı 🔕'),
                           duration: const Duration(seconds: 2),
                         ),
                       );
@@ -119,40 +117,14 @@ class SettingsScreen extends StatelessWidget {
                 ),
                 if (waterProvider.notificationsEnabled) ...[
                   const Divider(height: 1, indent: 64),
-                  // Hatırlatma Sıklığı
-                  ListTile(
-                    leading: const CircleAvatar(
+                  // Hatırlatma Saatleri Bilgisi
+                  const ListTile(
+                    leading: CircleAvatar(
                       backgroundColor: Color(0xFFFEF3C7),
-                      child: Icon(Icons.timer_outlined, color: Colors.amber),
+                      child: Icon(Icons.schedule, color: Colors.amber),
                     ),
-                    title: const Text('Hatırlatma Sıklığı'),
-                    subtitle: Text(intervalLabel),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _showIntervalPicker(context, waterProvider),
-                  ),
-                  const Divider(height: 1, indent: 64),
-                  // Sessiz Saatler: Uyanma Saati
-                  ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFFEF3C7),
-                      child: Icon(Icons.wb_sunny_outlined, color: Colors.amber),
-                    ),
-                    title: const Text('Uyanma Saati'),
-                    subtitle: Text('Bildirim başlangıcı: $wakeTimeStr'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _pickWakeTime(context, waterProvider),
-                  ),
-                  const Divider(height: 1, indent: 64),
-                  // Sessiz Saatler: Uyku Saati
-                  ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFFEF3C7),
-                      child: Icon(Icons.bedtime_outlined, color: Colors.amber),
-                    ),
-                    title: const Text('Uyku Saati'),
-                    subtitle: Text('Bildirim bitişi: $bedTimeStr (Sessiz mod)'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _pickBedTime(context, waterProvider),
+                    title: Text('Hatırlatma Saatleri'),
+                    subtitle: Text('12:00 (Öğle Molası) • 21:00 (Akşam Özeti)'),
                   ),
                   const Divider(height: 1, indent: 64),
                   // Anında Test Bildirimi Butonu
@@ -178,29 +150,119 @@ class SettingsScreen extends StatelessWidget {
                       }
                     },
                   ),
-                  const Divider(height: 1, indent: 64),
-                  // 1 Dakika Sonra Zamanlanmış Test Butonu
-                  ListTile(
-                    leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFE0F2FE),
-                      child: Icon(Icons.alarm, color: Colors.blue),
-                    ),
-                    title: const Text(
-                      '1 Dakika Sonra Hatırlatma Testi',
-                      style: TextStyle(fontWeight: FontWeight.w600, color: Colors.blue),
-                    ),
-                    subtitle: const Text('Zamanlanmış arka plan alarmını test et (ekranı kilitleyin)'),
-                    onTap: () async {
-                      await waterProvider.sendOneMinuteReminderTest();
+                ],
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // --- 3. Adım Takibi & Health Connect ---
+          _buildSectionHeader(context, 'ADIM TAKİBİ & HEALTH CONNECT'),
+          Card(
+            elevation: 0.5,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: CircleAvatar(
+                    backgroundColor: const Color(0xFFFEE2E2),
+                    child: Icon(Icons.favorite, color: Colors.red[600]),
+                  ),
+                  title: const Text('Google Health Connect'),
+                  subtitle: Text(
+                    stepProvider.isHealthConnectEnabled
+                        ? 'Aktif (Google Fit ve akıllı saat ile arka planda kesintisiz adım senkronizasyonu)'
+                        : 'Kapalı (Yalnızca telefonun yerel adımsayar sensörü kullanılır)',
+                  ),
+                  value: stepProvider.isHealthConnectEnabled,
+                  onChanged: (val) async {
+                    if (val) {
+                      final success = await stepProvider.enableHealthConnect();
+                      if (context.mounted) {
+                        if (success) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Google Health Connect bağlandı! Adımlar otomatik senkronize edilecek. 🏃‍♂️'),
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                        } else {
+                          final status = await HealthService().checkStatus();
+                          if (!context.mounted) return;
+                          if (status == HealthServiceStatus.notInstalled) {
+                            _showHealthConnectInstallDialog(context);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text('Health Connect adım okuma izni verilmedi.'),
+                                action: SnackBarAction(
+                                  label: 'İzinleri Aç',
+                                  onPressed: () => HealthService().openHealthConnectSettings(),
+                                ),
+                                duration: const Duration(seconds: 5),
+                              ),
+                            );
+                          }
+                        }
+                      }
+                    } else {
+                      await stepProvider.disableHealthConnect();
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Hatırlatma kuruldu! 1 dakika sonra bildirim gelecek, ekranı kilitleyebilirsiniz ⏱️'),
-                            duration: Duration(seconds: 4),
+                            content: Text('Health Connect kapatıldı, yerel sensöre dönüldü.'),
+                            duration: Duration(seconds: 2),
                           ),
                         );
                       }
-                    },
+                    }
+                  },
+                ),
+                const Divider(height: 1, indent: 64),
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blue.withValues(alpha: 0.15),
+                    child: const Icon(Icons.tune, color: Colors.blue),
+                  ),
+                  title: const Text('Health Connect İzinleri'),
+                  subtitle: const Text('Sistem izinlerini görüntüle veya aç'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => HealthService().openHealthConnectSettings(),
+                ),
+                if (stepProvider.isHealthConnectEnabled) ...[
+                  const Divider(height: 1, indent: 64),
+                  ListTile(
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0xFFDCFCE7),
+                      child: Icon(Icons.sync, color: Colors.green),
+                    ),
+                    title: const Text('Şimdi Senkronize Et'),
+                    subtitle: Text(
+                      stepProvider.lastSyncTime != null
+                          ? 'Son güncelleme: ${DateFormat('HH:mm').format(stepProvider.lastSyncTime!)} (${stepProvider.todaySteps} adım)'
+                          : 'Henüz senkronize edilmedi',
+                    ),
+                    trailing: stepProvider.isSyncing
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                    onTap: stepProvider.isSyncing
+                        ? null
+                        : () async {
+                            await stepProvider.sync();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Adımlar senkronize edildi: ${stepProvider.todaySteps} adım 👟'),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          },
                   ),
                 ],
               ],
@@ -209,7 +271,7 @@ class SettingsScreen extends StatelessWidget {
 
           const SizedBox(height: 20),
 
-          // --- 3. Veri Yönetimi ---
+          // --- 4. Veri Yönetimi ---
           _buildSectionHeader(context, 'VERİ & DEPOLAMA'),
           Card(
             elevation: 0.5,
@@ -268,88 +330,7 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  String _getIntervalLabel(int minutes) {
-    if (minutes == 30) return 'Her 30 dakikada bir';
-    if (minutes == 45) return 'Her 45 dakikada bir';
-    if (minutes == 60) return 'Her 1 saatte bir';
-    if (minutes == 90) return 'Her 1.5 saatte bir';
-    if (minutes == 120) return 'Her 2 saatte bir';
-    if (minutes == 180) return 'Her 3 saatte bir';
-    return 'Her $minutes dakikada bir';
-  }
 
-  // Hatırlatma Sıklığı Seçici BottomSheet
-  void _showIntervalPicker(BuildContext context, WaterProvider provider) {
-    final intervals = [
-      {'label': 'Her 30 dakikada bir', 'min': 30},
-      {'label': 'Her 45 dakikada bir', 'min': 45},
-      {'label': 'Her 1 saatte bir (Önerilen)', 'min': 60},
-      {'label': 'Her 1.5 saatte bir', 'min': 90},
-      {'label': 'Her 2 saatte bir', 'min': 120},
-      {'label': 'Her 3 saatte bir', 'min': 180},
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Hatırlatma Sıklığı Seçin',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-              const Divider(height: 1),
-              ...intervals.map((item) {
-                final int m = item['min'] as int;
-                final bool isSelected = provider.reminderIntervalMinutes == m;
-                return ListTile(
-                  title: Text(item['label'] as String),
-                  trailing: isSelected ? const Icon(Icons.check, color: Colors.blue) : null,
-                  onTap: () {
-                    provider.setReminderInterval(m);
-                    Navigator.pop(ctx);
-                  },
-                );
-              }),
-              const SizedBox(height: 12),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // Uyanma Saati Seçici
-  Future<void> _pickWakeTime(BuildContext context, WaterProvider provider) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: provider.wakeUpHour, minute: provider.wakeUpMinute),
-      helpText: 'UYANMA SAATİ SEÇİN',
-    );
-    if (picked != null) {
-      await provider.setWakeTime(picked.hour, picked.minute);
-    }
-  }
-
-  // Uyku Saati Seçici
-  Future<void> _pickBedTime(BuildContext context, WaterProvider provider) async {
-    final TimeOfDay? picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: provider.bedTimeHour, minute: provider.bedTimeMinute),
-      helpText: 'UYKU SAATİ SEÇİN',
-    );
-    if (picked != null) {
-      await provider.setBedTime(picked.hour, picked.minute);
-    }
-  }
 
   // Manuel Su Hedefi Düzenleme Dialog'u
   void _showEditTargetDialog(BuildContext context, WaterProvider provider) {
@@ -532,6 +513,39 @@ class SettingsScreen extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+
+  // Health Connect Yükleme Dialog'u
+  void _showHealthConnectInstallDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.health_and_safety, color: Colors.redAccent),
+            SizedBox(width: 8),
+            Text('Health Connect Gerekli'),
+          ],
+        ),
+        content: const Text(
+          'Arka planda kesintisiz adım sayımı için cihazınızda Google Health Connect yüklü olmalıdır.\n\nPlay Store üzerinden ücretsiz olarak yükleyebilirsiniz.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton.icon(
+            icon: const Icon(Icons.download),
+            label: const Text('Play Store\'dan Yükle'),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await HealthService().installHealthConnect();
+            },
+          ),
+        ],
+      ),
     );
   }
 }

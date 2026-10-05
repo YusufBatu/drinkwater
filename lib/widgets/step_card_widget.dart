@@ -53,37 +53,79 @@ class StepCardWidget extends StatelessWidget {
                     backgroundColor: isDark ? Colors.green.withValues(alpha: 0.25) : const Color(0xFFDCFCE7),
                     child: Icon(Icons.directions_walk, size: 20, color: isDark ? Colors.greenAccent : Colors.green[700]),
                   ),
-                  const SizedBox(width: 10),
-                  const Text(
-                    'Günlük Adım',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Günlük Adım',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      Row(
+                        children: [
+                          Icon(
+                            stepProvider.isHealthConnectEnabled ? Icons.favorite : Icons.sensors,
+                            size: 11,
+                            color: stepProvider.isHealthConnectEnabled ? Colors.redAccent : Colors.blueGrey,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            stepProvider.isHealthConnectEnabled ? 'Health Connect' : 'Cihaz Sensörü',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: theme.colorScheme.outline,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? (isCompleted ? Colors.green.withValues(alpha: 0.2) : Colors.white10)
-                      : (isCompleted ? const Color(0xFFDCFCE7) : Colors.blueGrey.withValues(alpha: 0.1)),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  !stepProvider.isSensorAvailable
-                      ? 'İzin Gerekli ⚠️'
-                      : isCompleted
-                          ? '🎉 Hedef Tamamlandı!'
-                          : stepProvider.pedestrianStatus,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: !stepProvider.isSensorAvailable
-                        ? Colors.orangeAccent
-                        : isCompleted
-                            ? (isDark ? Colors.greenAccent : Colors.green[800])
-                            : (isDark ? Colors.white70 : Colors.blueGrey[700]),
+              Row(
+                children: [
+                  if (stepProvider.isHealthConnectEnabled) ...[
+                    IconButton(
+                      icon: stepProvider.isSyncing
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync, size: 18),
+                      tooltip: 'Senkronize Et',
+                      padding: const EdgeInsets.all(4),
+                      constraints: const BoxConstraints(),
+                      onPressed: stepProvider.isSyncing ? null : () => stepProvider.sync(),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? (isCompleted ? Colors.green.withValues(alpha: 0.2) : Colors.white10)
+                          : (isCompleted ? const Color(0xFFDCFCE7) : Colors.blueGrey.withValues(alpha: 0.1)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      !stepProvider.isSensorAvailable
+                          ? 'İzin Gerekli ⚠️'
+                          : isCompleted
+                              ? '🎉 Hedef Tamamlandı!'
+                              : (stepProvider.isHealthConnectEnabled ? 'Senkronize 🔄' : stepProvider.pedestrianStatus),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: !stepProvider.isSensorAvailable
+                            ? Colors.orangeAccent
+                            : isCompleted
+                                ? (isDark ? Colors.greenAccent : Colors.green[800])
+                                : (isDark ? Colors.white70 : Colors.blueGrey[700]),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),

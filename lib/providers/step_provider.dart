@@ -4,6 +4,13 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/step_log.dart';
 import '../services/storage_service.dart';
+import '../services/health_service.dart';
+
+enum StepSource {
+  deviceSensor,
+  healthConnect,
+  manual,
+}
 
 class StepDayStat {
   final DateTime date;
@@ -29,6 +36,11 @@ class StepProvider extends ChangeNotifier {
   bool _isLoading = true;
   List<StepLog> _history = [];
 
+  StepSource _currentSource = StepSource.deviceSensor;
+  bool _isHealthConnectEnabled = false;
+  bool _isSyncing = false;
+  DateTime? _lastSyncTime;
+
   StreamSubscription<StepCount>? _stepCountSubscription;
   StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
 
@@ -38,6 +50,10 @@ class StepProvider extends ChangeNotifier {
   bool get isSensorAvailable => _isSensorAvailable;
   bool get isLoading => _isLoading;
   List<StepLog> get history => _history;
+  StepSource get currentSource => _currentSource;
+  bool get isHealthConnectEnabled => _isHealthConnectEnabled;
+  bool get isSyncing => _isSyncing;
+  DateTime? get lastSyncTime => _lastSyncTime;
 
   // Hesaplanan Metrikler
   double get distanceKm => _todaySteps * 0.00075; // Ortalama 75 cm adım boyu
@@ -54,6 +70,7 @@ class StepProvider extends ChangeNotifier {
     final todayKey = _getTodayKey();
     _stepTarget = await StorageService.loadStepTarget();
     _history = await StorageService.loadStepHistory();
+    _isHealthConnectEnabled = await StorageService.loadHealthConnectEnabled();
 
     final savedDateKey = await StorageService.loadStepDateKey();
     final savedTodaySteps = await StorageService.loadTodaySteps();
@@ -67,29 +84,39 @@ class StepProvider extends ChangeNotifier {
       await StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
       await StorageService.saveTodaySteps(0);
     } else if (savedDateKey != todayKey) {
-      // 1. SORUNUN ÇÖZÜMÜ: Gün değişmiş (gece yarısı 00:00 geçmiş veya ertesi gün açılmış)
-      // Dünün adımları diske kaydedilmişti; şimdi geçmişe güvenle arşivliyoruz.
+      // Gün değişmiş (gece yarısı 00:00 geçmiş veya ertesi gün açılmış)
       if (savedTodaySteps > 0) {
         _archiveDay(savedDateKey, savedTodaySteps);
       }
-
-      // 2. SORUNUN ÇÖZÜMÜ: Yeni gün için sayacı sıfırla, baseline'ı -1 bırak
-      // (Böylece 0 kabul edilip hayalet 50.000 adım patlaması yaşanmaz; ilk sensör verisi gelince baz alınır)
       _lastDateKey = todayKey;
       _todaySteps = 0;
       _baselineSensorSteps = -1;
       await StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
       await StorageService.saveTodaySteps(0);
     } else {
-      // 3. SORUNUN ÇÖZÜMÜ: Gün içi yeniden açılış
-      // Önceden diske kaydedilen adımları anında yükle (0 görünmez)
+      // Gün içi yeniden açılış
       _lastDateKey = todayKey;
       _todaySteps = savedTodaySteps;
       _baselineSensorSteps = savedBaseline;
     }
 
-    // Sensör izinlerini iste ve dinlemeyi başlat
-    await _initPedometer();
+    if (_isHealthConnectEnabled) {
+      final hasPerm = await HealthService().hasPermissions();
+      if (hasPerm) {
+        _currentSource = StepSource.healthConnect;
+        _pedestrianStatus = 'Senkronize';
+        await syncHealthConnectSteps();
+      } else {
+        _currentSource = StepSource.deviceSensor;
+        await _initPedometer();
+      }
+    } else {
+      _currentSource = StepSource.deviceSensor;
+      await _initPedometer();
+    }
+
+    // Ana Ekran Widget'ını güncelle
+    await StorageService.syncAppWidget();
 
     _isLoading = false;
     notifyListeners();
@@ -199,6 +226,7 @@ class StepProvider extends ChangeNotifier {
     if (calculated >= _todaySteps) {
       _todaySteps = calculated.clamp(0, 999999);
       StorageService.saveTodaySteps(_todaySteps);
+      StorageService.syncAppWidget();
     }
 
     _isSensorAvailable = true;
@@ -221,6 +249,7 @@ class StepProvider extends ChangeNotifier {
     if (target < 1000) target = 1000;
     _stepTarget = target;
     await StorageService.saveStepTarget(target);
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
@@ -233,6 +262,7 @@ class StepProvider extends ChangeNotifier {
       StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
     }
     StorageService.saveTodaySteps(_todaySteps);
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
@@ -272,26 +302,139 @@ class StepProvider extends ChangeNotifier {
     return stats;
   }
 
+  // --- Health Connect & Senkronizasyon Metotları ---
+
+  /// Health Connect senkronizasyonunu etkinleştir
+  Future<bool> enableHealthConnect() async {
+    final status = await HealthService().checkStatus();
+    if (status != HealthServiceStatus.available) {
+      if (status == HealthServiceStatus.notInstalled) {
+        await HealthService().installHealthConnect();
+      }
+      return false;
+    }
+
+    final granted = await HealthService().requestPermissions();
+    if (granted) {
+      _isHealthConnectEnabled = true;
+      _currentSource = StepSource.healthConnect;
+      await StorageService.saveHealthConnectEnabled(true);
+
+      // Cihaz sensörü dinleyicilerini durdur (batarya tasarrufu)
+      await _stepCountSubscription?.cancel();
+      _stepCountSubscription = null;
+      await _pedestrianStatusSubscription?.cancel();
+      _pedestrianStatusSubscription = null;
+      _pedestrianStatus = 'Senkronize';
+
+      await syncHealthConnectSteps();
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Health Connect senkronizasyonunu devre dışı bırak ve cihaz sensörüne dön
+  Future<void> disableHealthConnect() async {
+    _isHealthConnectEnabled = false;
+    _currentSource = StepSource.deviceSensor;
+    await StorageService.saveHealthConnectEnabled(false);
+    await _initPedometer();
+    notifyListeners();
+  }
+
+  /// Uygulama arka plandan açıldığında veya yenilendiğinde adımları güncelle
+  Future<void> sync() async {
+    if (_isHealthConnectEnabled) {
+      await syncHealthConnectSteps();
+    } else {
+      final todayKey = _getTodayKey();
+      if (_lastDateKey != todayKey && _lastDateKey.isNotEmpty) {
+        if (_todaySteps > 0) {
+          _archiveDay(_lastDateKey, _todaySteps);
+        }
+        _lastDateKey = todayKey;
+        _todaySteps = 0;
+        _baselineSensorSteps = -1;
+        await StorageService.saveStepBaselineAndDate(_baselineSensorSteps, _lastDateKey);
+        await StorageService.saveTodaySteps(0);
+        notifyListeners();
+      }
+    }
+  }
+
+  /// Health Connect üzerinden bugünün ve geçmiş günlerin adımlarını çek
+  Future<void> syncHealthConnectSteps() async {
+    if (_isSyncing) return;
+    _isSyncing = true;
+    notifyListeners();
+
+    try {
+      final steps = await HealthService().getTodaySteps();
+      final todayKey = _getTodayKey();
+
+      if (_lastDateKey != todayKey && _lastDateKey.isNotEmpty) {
+        if (_todaySteps > 0) {
+          _archiveDay(_lastDateKey, _todaySteps);
+        }
+        _lastDateKey = todayKey;
+        await StorageService.saveStepBaselineAndDate(-1, _lastDateKey);
+      }
+
+      if (steps != null) {
+        _todaySteps = steps.clamp(0, 999999);
+        await StorageService.saveTodaySteps(_todaySteps);
+        StorageService.syncAppWidget();
+        _lastSyncTime = DateTime.now();
+        _isSensorAvailable = true;
+      }
+
+      // Geçmiş 7 günün Health Connect adımlarını da arşivle
+      final now = DateTime.now();
+      for (int i = 1; i <= 7; i++) {
+        final date = DateTime(now.year, now.month, now.day - i);
+        final dayStart = DateTime(date.year, date.month, date.day, 0, 0, 0);
+        final dayEnd = DateTime(date.year, date.month, date.day, 23, 59, 59);
+        final pastSteps = await HealthService().getStepsForInterval(dayStart, dayEnd);
+        if (pastSteps != null && pastSteps > 0) {
+          final pastDateKey = "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+          _archiveDay(pastDateKey, pastSteps);
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) print("Health Connect senkronizasyon hatası: $e");
+    } finally {
+      _isSyncing = false;
+      notifyListeners();
+    }
+  }
+
   // Tüm Adım Verilerini Tek Seferde Temizle
   Future<void> resetAllStepData() async {
     _todaySteps = 0;
     _history.clear();
     _baselineSensorSteps = -1;
+    _lastSyncTime = null;
     await StorageService.saveTodaySteps(0);
     await StorageService.saveStepHistory([]);
     await StorageService.saveStepBaselineAndDate(-1, _getTodayKey());
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
-  // Sensör iznini tekrar iste veya ayarları aç
+  // Sensör veya Health Connect iznini tekrar iste / ayarları aç
   Future<void> retryPermissionAndInit() async {
-    final status = await Permission.activityRecognition.request();
-    if (status.isGranted) {
-      _isSensorAvailable = true;
-      await _initPedometer();
-      notifyListeners();
-    } else if (status.isPermanentlyDenied) {
-      await openAppSettings();
+    if (_isHealthConnectEnabled) {
+      await enableHealthConnect();
+    } else {
+      final status = await Permission.activityRecognition.request();
+      if (status.isGranted) {
+        _isSensorAvailable = true;
+        await _initPedometer();
+        notifyListeners();
+      } else if (status.isPermanentlyDenied) {
+        await openAppSettings();
+      }
     }
   }
 

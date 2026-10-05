@@ -25,6 +25,7 @@ class WaterProvider extends ChangeNotifier {
 
   // Bildirim Alanları
   bool _notificationsEnabled = true;
+  bool _smartReminderEnabled = true;
   int _reminderIntervalMinutes = 60;
   int _wakeUpHour = 8;
   int _wakeUpMinute = 0;
@@ -37,6 +38,8 @@ class WaterProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
 
   bool get notificationsEnabled => _notificationsEnabled;
+  bool get smartReminderEnabled => _smartReminderEnabled;
+  DateTime? get lastDrinkTime => todayLogs.isNotEmpty ? todayLogs.first.timestamp : null;
   int get reminderIntervalMinutes => _reminderIntervalMinutes;
   int get wakeUpHour => _wakeUpHour;
   int get wakeUpMinute => _wakeUpMinute;
@@ -54,6 +57,7 @@ class WaterProvider extends ChangeNotifier {
 
     // Bildirim ayarlarını yükle
     _notificationsEnabled = await StorageService.loadNotificationsEnabled();
+    _smartReminderEnabled = await StorageService.loadSmartReminderEnabled();
     _reminderIntervalMinutes = await StorageService.loadReminderInterval();
     _wakeUpHour = await StorageService.loadWakeHour();
     _wakeUpMinute = await StorageService.loadWakeMinute();
@@ -65,6 +69,9 @@ class WaterProvider extends ChangeNotifier {
     if (_notificationsEnabled) {
       await rescheduleNotifications();
     }
+
+    // Ana Ekran Widget'ını güncelle
+    await StorageService.syncAppWidget();
 
     _isLoading = false;
     notifyListeners();
@@ -114,6 +121,10 @@ class WaterProvider extends ChangeNotifier {
 
     _logs.add(newLog);
     await StorageService.saveLogs(_logs);
+    if (_notificationsEnabled) {
+      await rescheduleNotifications();
+    }
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
@@ -121,6 +132,10 @@ class WaterProvider extends ChangeNotifier {
   Future<void> removeLog(String id) async {
     _logs.removeWhere((log) => log.id == id);
     await StorageService.saveLogs(_logs);
+    if (_notificationsEnabled) {
+      await rescheduleNotifications();
+    }
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
@@ -139,6 +154,10 @@ class WaterProvider extends ChangeNotifier {
     if (target < 500) target = 500;
     _dailyTarget = target;
     await StorageService.saveDailyTarget(target);
+    if (_notificationsEnabled) {
+      await rescheduleNotifications();
+    }
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 
@@ -249,6 +268,7 @@ class WaterProvider extends ChangeNotifier {
     await StorageService.saveNotificationsEnabled(enabled);
 
     if (enabled) {
+      await NotificationService.requestPermissions();
       await rescheduleNotifications();
     } else {
       await NotificationService.cancelAllNotifications();
@@ -288,15 +308,23 @@ class WaterProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Bildirimleri Yeniden Planla
+  // Bildirimleri Yeniden Planla (12:00 ve 21:00)
   Future<void> rescheduleNotifications() async {
-    await NotificationService.schedulePeriodicReminders(
-      intervalMinutes: _reminderIntervalMinutes,
-      wakeUpHour: _wakeUpHour,
-      wakeUpMinute: _wakeUpMinute,
-      bedTimeHour: _bedTimeHour,
-      bedTimeMinute: _bedTimeMinute,
-    );
+    if (_notificationsEnabled) {
+      await NotificationService.scheduleDailyReminders();
+    } else {
+      await NotificationService.cancelAllNotifications();
+    }
+  }
+
+  // Akıllı Hatırlatıcı Aç / Kapat
+  Future<void> toggleSmartReminder(bool enabled) async {
+    _smartReminderEnabled = enabled;
+    await StorageService.saveSmartReminderEnabled(enabled);
+    if (_notificationsEnabled) {
+      await rescheduleNotifications();
+    }
+    notifyListeners();
   }
 
   // Anında Test Bildirimi Gönder
@@ -316,6 +344,10 @@ class WaterProvider extends ChangeNotifier {
   Future<void> clearAllLogs() async {
     _logs.clear();
     await StorageService.saveLogs([]);
+    if (_notificationsEnabled) {
+      await rescheduleNotifications();
+    }
+    StorageService.syncAppWidget();
     notifyListeners();
   }
 }

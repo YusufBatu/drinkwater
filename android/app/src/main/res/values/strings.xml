@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_name">DrinkWater (2x2)</string>
+    <string name="widget_2x1_name">DrinkWater (2x1)</string>
+    <string name="widget_description">Günlük su ve adım ilerlemenizi ana ekrandan takip edin (2x2).</string>
+    <string name="widget_2x1_description">Günlük su ve adım ilerlemenizi kompakt görünümde takip edin (2x1).</string>
+</resources>

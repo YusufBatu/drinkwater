@@ -17,10 +17,32 @@ class NotificationService {
     // Saat dilimlerini ve yerel cihaz saat dilimini başlat
     tz.initializeTimeZones();
     try {
-      final timezoneInfo = await FlutterTimezone.getLocalTimezone();
-      final String timeZoneName = timezoneInfo.identifier;
-      tz.setLocalLocation(tz.getLocation(timeZoneName));
+      final dynamic timezoneInfo = await FlutterTimezone.getLocalTimezone();
+      String timeZoneName = timezoneInfo is String ? timezoneInfo : (timezoneInfo.identifier ?? '');
+      
+      // Geçersiz veya ham GMT formatındaysa fallback yap
+      if (timeZoneName.isEmpty || timeZoneName.startsWith('GMT') || timeZoneName.startsWith('UTC')) {
+        final offsetHours = DateTime.now().timeZoneOffset.inHours;
+        if (offsetHours == 3) {
+          timeZoneName = 'Europe/Istanbul';
+        } else {
+          timeZoneName = 'UTC';
+        }
+      }
+
+      try {
+        tz.setLocalLocation(tz.getLocation(timeZoneName));
+      } catch (_) {
+        if (DateTime.now().timeZoneOffset.inHours == 3) {
+          tz.setLocalLocation(tz.getLocation('Europe/Istanbul'));
+        }
+      }
     } catch (e) {
+      try {
+        if (DateTime.now().timeZoneOffset.inHours == 3) {
+          tz.setLocalLocation(tz.getLocation('Europe/Istanbul'));
+        }
+      } catch (_) {}
       if (kDebugMode) {
         print("Yerel saat dilimi tespit edilemedi, varsayılan kullanılıyor: $e");
       }
@@ -43,7 +65,7 @@ class NotificationService {
         },
       );
 
-      // Android 13+ bildirim izni iste
+      // Android 13+ bildirim izni ve exact alarm izni iste
       await requestPermissions();
     } catch (e) {
       if (kDebugMode) {
@@ -54,7 +76,7 @@ class NotificationService {
     _isInitialized = true;
   }
 
-  // İzinleri İste (Android 13+ POST_NOTIFICATIONS & EXACT_ALARM)
+  // İzinleri İste (Android 13+ POST_NOTIFICATIONS)
   static Future<bool> requestPermissions() async {
     final androidPlugin = _notificationsPlugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -96,22 +118,15 @@ class NotificationService {
     );
   }
 
-  // Uyanma ve Yatma Saatleri Arasında Periyodik Bildirimleri Planla
-  static Future<void> schedulePeriodicReminders({
-    required int intervalMinutes,
-    required int wakeUpHour,
-    required int wakeUpMinute,
-    required int bedTimeHour,
-    required int bedTimeMinute,
-  }) async {
+  // Günlük 12:00 ve 21:00 Hatırlatıcılarını Planla
+  static Future<void> scheduleDailyReminders() async {
     await init();
-    // Önceki planlanmış tüm bildirimleri temizle
     await cancelAllNotifications();
 
     const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'drinkwater_scheduled_channel',
       'Su İçme Hatırlatıcıları',
-      channelDescription: 'Periyodik su içme hatırlatıcı bildirimleri',
+      channelDescription: 'Günlük su içme hatırlatıcı bildirimleri (12:00 ve 21:00)',
       importance: Importance.high,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
@@ -123,86 +138,102 @@ class NotificationService {
       android: androidDetails,
     );
 
-    final List<String> reminderMessages = [
-      "Vücudunu susuz bırakma! Bir bardak su içme zamanı 💧",
-      "Küçük bir mola verip bir bardak su içmeye ne dersin? 🥛",
-      "Enerjini yüksek tut! Su içmeyi unutma ⚡",
-      "Bugünkü hedefine yaklaşmak için harika bir an! 🎯",
-      "Cildin ve sağlığın için bir bardak taze su iç 🌊",
-    ];
+    final tzNow = tz.TZDateTime.now(tz.local);
 
-    int notificationId = 100;
-    final now = DateTime.now();
-
-    // Sonsuz döngü önlemi: aralık en az 15 dakika olmalı
-    final int safeInterval = intervalMinutes <= 0 ? 60 : intervalMinutes;
-
-    final int startTotalMinutes = wakeUpHour * 60 + wakeUpMinute;
-    int endTotalMinutes = bedTimeHour * 60 + bedTimeMinute;
-
-    // Gece yarısını geçen uyku saatleri desteği (Örn: Uyanma 08:00, Uyku 01:00)
-    if (endTotalMinutes <= startTotalMinutes) {
-      endTotalMinutes += 24 * 60;
+    // 1. Öğle Hatırlatıcısı (12:00)
+    tz.TZDateTime scheduled12 = tz.TZDateTime(
+      tz.local,
+      tzNow.year,
+      tzNow.month,
+      tzNow.day,
+      12,
+      0,
+    );
+    if (scheduled12.isBefore(tzNow)) {
+      scheduled12 = scheduled12.add(const Duration(days: 1));
     }
 
-    int currentMinute = startTotalMinutes;
-    int messageIndex = 0;
+    // 2. Akşam Hatırlatıcısı (21:00)
+    tz.TZDateTime scheduled21 = tz.TZDateTime(
+      tz.local,
+      tzNow.year,
+      tzNow.month,
+      tzNow.day,
+      21,
+      0,
+    );
+    if (scheduled21.isBefore(tzNow)) {
+      scheduled21 = scheduled21.add(const Duration(days: 1));
+    }
 
-
-
-    while (currentMinute <= endTotalMinutes) {
-      final int normalizedMinute = currentMinute % (24 * 60);
-      final int hour = normalizedMinute ~/ 60;
-      final int minute = normalizedMinute % 60;
-
-      DateTime scheduledDate = DateTime(
-        now.year,
-        now.month,
-        now.day,
-        hour,
-        minute,
+    // 12:00 Bildirimini Planla
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id: 101,
+        title: '💧 Gün Ortası Su Molası!',
+        body: 'Günün yarısı geride kaldı! Su hedefine yaklaşmak için bir bardak taze su içmeyi unutma 🌊',
+        scheduledDate: scheduled12,
+        notificationDetails: platformDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
       );
-
-      // Eğer saat bugünün vaktini geçtiyse yarına planla
-      if (scheduledDate.isBefore(now)) {
-        scheduledDate = scheduledDate.add(const Duration(days: 1));
-      }
-
-      final tz.TZDateTime tzScheduledDate = tz.TZDateTime.from(scheduledDate, tz.local);
-      final String msg = reminderMessages[messageIndex % reminderMessages.length];
-
+    } catch (_) {
       try {
         await _notificationsPlugin.zonedSchedule(
-          id: notificationId++,
-          title: '💧 Su İçme Zamanı!',
-          body: msg,
-          scheduledDate: tzScheduledDate,
+          id: 101,
+          title: '💧 Gün Ortası Su Molası!',
+          body: 'Günün yarısı geride kaldı! Su hedefine yaklaşmak için bir bardak taze su içmeyi unutma 🌊',
+          scheduledDate: scheduled12,
           notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
           matchDateTimeComponents: DateTimeComponents.time,
         );
       } catch (e) {
-        // Tam alarm izni yoksa inexact ile garanti planla
-        try {
-          await _notificationsPlugin.zonedSchedule(
-            id: notificationId++,
-            title: '💧 Su İçme Zamanı!',
-            body: msg,
-            scheduledDate: tzScheduledDate,
-            notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-            matchDateTimeComponents: DateTimeComponents.time,
-          );
-        } catch (innerError) {
-          if (kDebugMode) {
-            print("Bildirim planlanamadı: $innerError");
-          }
-        }
+        if (kDebugMode) print("12:00 bildirimi planlanamadı: $e");
       }
-
-      currentMinute += safeInterval;
-      messageIndex++;
     }
+
+    // 21:00 Bildirimini Planla
+    try {
+      await _notificationsPlugin.zonedSchedule(
+        id: 102,
+        title: '💧 Akşam Su Hatırlatıcısı!',
+        body: 'Günü tamamlamadan önce su hedefini kontrol et! Vücudunu susuz bırakma 🥛',
+        scheduledDate: scheduled21,
+        notificationDetails: platformDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.time,
+      );
+    } catch (_) {
+      try {
+        await _notificationsPlugin.zonedSchedule(
+          id: 102,
+          title: '💧 Akşam Su Hatırlatıcısı!',
+          body: 'Günü tamamlamadan önce su hedefini kontrol et! Vücudunu susuz bırakma 🥛',
+          scheduledDate: scheduled21,
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.time,
+        );
+      } catch (e) {
+        if (kDebugMode) print("21:00 bildirimi planlanamadı: $e");
+      }
+    }
+  }
+
+  // Geriye dönük uyumluluk için alias (12:00 & 21:00)
+  static Future<void> schedulePeriodicReminders({
+    int intervalMinutes = 60,
+    int wakeUpHour = 8,
+    int wakeUpMinute = 0,
+    int bedTimeHour = 23,
+    int bedTimeMinute = 0,
+    DateTime? lastDrinkTime,
+    bool smartReminderEnabled = false,
+    bool isTargetReached = false,
+    int smartDelayMinutes = 45,
+  }) async {
+    await scheduleDailyReminders();
   }
 
   // Tüm Bildirimleri İptal Et
@@ -226,7 +257,7 @@ class NotificationService {
       'drinkwater_scheduled_channel',
       'Su İçme Hatırlatıcıları',
       channelDescription: 'Periyodik su içme hatırlatıcı bildirimleri',
-      importance: Importance.high,
+      importance: Importance.max,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
       playSound: true,
@@ -240,11 +271,25 @@ class NotificationService {
         body: 'Harika! Zamanlanmış arka plan hatırlatıcıları telefonunda sorunsuz çalışıyor ⏱️',
         scheduledDate: tzDate,
         notificationDetails: const NotificationDetails(android: androidDetails),
-        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       );
     } catch (e) {
       if (kDebugMode) {
-        print("1 dakikalık test bildirimi hatası: $e");
+        print("1 dakikalık test exact hatası, inexact deneniyor: $e");
+      }
+      try {
+        await _notificationsPlugin.zonedSchedule(
+          id: 999,
+          title: '💧 1 Dakikalık Hatırlatma Testi!',
+          body: 'Harika! Zamanlanmış arka plan hatırlatıcıları telefonunda sorunsuz çalışıyor ⏱️',
+          scheduledDate: tzDate,
+          notificationDetails: const NotificationDetails(android: androidDetails),
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+        );
+      } catch (innerError) {
+        if (kDebugMode) {
+          print("1 dakikalık test bildirimi hatası: $innerError");
+        }
       }
     }
   }

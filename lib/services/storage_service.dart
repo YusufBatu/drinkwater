@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/water_log.dart';
 import '../models/step_log.dart';
+import 'widget_service.dart';
 
 class StorageService {
   static const String _keyWaterLogs = 'drinkwater_logs';
@@ -15,6 +16,7 @@ class StorageService {
   static const String _keyWakeMinute = 'drinkwater_wake_minute';
   static const String _keyBedHour = 'drinkwater_bed_hour';
   static const String _keyBedMinute = 'drinkwater_bed_minute';
+  static const String _keySmartReminderEnabled = 'drinkwater_smart_reminder_enabled';
 
   // Adımsayar anahtarları
   static const String _keyStepTarget = 'drinkwater_step_target';
@@ -22,6 +24,7 @@ class StorageService {
   static const String _keyStepDateKey = 'drinkwater_step_date_key';
   static const String _keyStepHistory = 'drinkwater_step_history';
   static const String _keyStepTodaySteps = 'drinkwater_step_today_steps';
+  static const String _keyHealthConnectEnabled = 'drinkwater_health_connect_enabled';
 
   // Su kayıtlarını yükle
   static Future<List<WaterLog>> loadLogs() async {
@@ -122,6 +125,16 @@ class StorageService {
     await prefs.setInt(_keyBedMinute, minute);
   }
 
+  static Future<bool> loadSmartReminderEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySmartReminderEnabled) ?? true; // Varsayılan açık
+  }
+
+  static Future<void> saveSmartReminderEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySmartReminderEnabled, enabled);
+  }
+
   // --- Adımsayar Depolama Metotları ---
   static Future<int> loadStepTarget() async {
     final prefs = await SharedPreferences.getInstance();
@@ -175,5 +188,44 @@ class StorageService {
     final prefs = await SharedPreferences.getInstance();
     final String encoded = jsonEncode(history.map((log) => log.toJson()).toList());
     await prefs.setString(_keyStepHistory, encoded);
+  }
+
+  static Future<bool> loadHealthConnectEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyHealthConnectEnabled) ?? false;
+  }
+
+  static Future<void> saveHealthConnectEnabled(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyHealthConnectEnabled, enabled);
+  }
+
+  /// Ana Ekran Widget'ını güncel su ve adım verileriyle senkronize et
+  static Future<void> syncAppWidget() async {
+    try {
+      final logs = await loadLogs();
+      final now = DateTime.now();
+      final todayLogs = logs.where(
+        (l) =>
+            l.timestamp.year == now.year &&
+            l.timestamp.month == now.month &&
+            l.timestamp.day == now.day,
+      );
+      final todayWater = todayLogs.fold(0, (sum, l) => sum + l.amount);
+      final waterTarget = await loadDailyTarget();
+      final todaySteps = await loadTodaySteps();
+      final stepTarget = await loadStepTarget();
+      final stepBaseline = await loadStepBaseline();
+      final stepDateKey = await loadStepDateKey();
+
+      await WidgetService.updateWidgetData(
+        todayWater: todayWater,
+        waterTarget: waterTarget,
+        todaySteps: todaySteps,
+        stepTarget: stepTarget,
+        stepBaseline: stepBaseline,
+        stepDateKey: stepDateKey,
+      );
+    } catch (_) {}
   }
 }

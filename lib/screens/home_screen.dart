@@ -330,8 +330,12 @@ class HomeScreen extends StatelessWidget {
           provider.addWater(amount);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('+$amount ml su eklendi 💧'),
-              duration: const Duration(milliseconds: 1200),
+              content: Text(
+                provider.notificationsEnabled && provider.smartReminderEnabled
+                    ? '+$amount ml eklendi 💧 (Sıradaki hatırlatıcı akıllıca ötelendi)'
+                    : '+$amount ml su eklendi 💧',
+              ),
+              duration: const Duration(milliseconds: 1500),
             ),
           );
         },
@@ -413,7 +417,13 @@ class HomeScreen extends StatelessWidget {
                   provider.addWater(val);
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('+$val ml eklendi 💧')),
+                    SnackBar(
+                      content: Text(
+                        provider.notificationsEnabled && provider.smartReminderEnabled
+                            ? '+$val ml eklendi 💧 (Sıradaki hatırlatıcı akıllıca ötelendi)'
+                            : '+$val ml eklendi 💧',
+                      ),
+                    ),
                   );
                 }
               },
